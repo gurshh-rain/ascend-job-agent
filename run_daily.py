@@ -119,6 +119,22 @@ def _load_deferred(sent_log: dict[str, Any]) -> list[dict[str, Any]]:
     return deferred
 
 
+def _already_ran_today() -> bool:
+    """Return True if the bot already successfully ran today."""
+    sent_log = _load_json(settings.SENT_LOG_FILE)
+    last_run = sent_log.get("_last_run")
+    if isinstance(last_run, str):
+        return last_run == datetime.now().strftime("%Y-%m-%d")
+    return False
+
+
+def _record_run_today() -> None:
+    """Mark today's run as complete in the sent log."""
+    sent_log = _load_json(settings.SENT_LOG_FILE)
+    sent_log["_last_run"] = datetime.now().strftime("%Y-%m-%d")
+    _save_json(settings.SENT_LOG_FILE, sent_log)
+
+
 def main(dry_run: bool = False, limit: int | None = None) -> None:
     console = Console()
     settings.ensure_data_files_exist()
@@ -130,6 +146,11 @@ def main(dry_run: bool = False, limit: int | None = None) -> None:
     if limit:
         console.print(f"(limiting to first {limit} raw listings for testing)")
     console.print("=" * 60)
+
+    # Skip duplicate runs on the same day unless explicitly doing a dry run.
+    if not dry_run and _already_ran_today():
+        console.print("\\[run_daily] Already ran today. Skipping.")
+        return
 
     with Progress(
         SpinnerColumn(),
@@ -187,6 +208,8 @@ def main(dry_run: bool = False, limit: int | None = None) -> None:
         # 4. Send digest if there are candidates.
         if not candidates:
             console.print("\\[run_daily] Zero listings to send. Skipping email.")
+            if not dry_run:
+                _record_run_today()
             return
 
         email_task = progress.add_task("[magenta]Preparing email...", total=None)
@@ -196,6 +219,8 @@ def main(dry_run: bool = False, limit: int | None = None) -> None:
         send_digest(candidates, dry_run=dry_run, max_listings=max_listings or None)
         progress.update(email_task, completed=1, total=1)
 
+    if not dry_run:
+        _record_run_today()
     console.print("\\[run_daily] Done.")
 
 

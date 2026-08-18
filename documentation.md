@@ -232,8 +232,11 @@ Change the time (`09:00`) and the two paths to match your system.
 
 ### Important notes about automation
 
-- The scheduled task only runs `internship-bot`. It does **not** start the FastAPI server or Cloudflare tunnel.
-- For the email buttons to work, you still need the server and tunnel running. You can either leave them running in a terminal, create a second scheduled task for the server, or run them on startup.
+- The scheduled task created by `internship-bot-manage` has **two triggers**:
+  - A daily run at your chosen time (e.g. `09:00`).
+  - An "At logon" trigger, so if your PC is off at 9:00 the bot will run the next time you log in.
+- `run_daily.py` keeps track of the last run date in `data/sent_log.json`. If the bot already ran today, it skips the run, so the logon trigger does not cause duplicate emails.
+- `internship-bot` starts the FastAPI server and Cloudflare tunnel automatically, so the email buttons work without a separate terminal.
 - The bot uses your local Ollama model. Make sure Ollama is running before the scheduled task fires.
 
 ### Running the server automatically

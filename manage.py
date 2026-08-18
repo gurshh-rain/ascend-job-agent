@@ -14,7 +14,10 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+from datetime import datetime
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 import questionary
 from config.setup_wizard import ensure_setup
@@ -287,24 +290,84 @@ def _install_task(current: dict[str, str]) -> None:
         input("\nPress Enter to continue...")
         return
 
-    # schtasks command with quoted paths.
-    command = (
-        f'schtasks /create /tn "internship-bot-daily" '
-        f'/tr "\\"{python_exe}\\" \\"{run_daily}\\"" '
-        f'/sc daily /st {run_time} /f'
-    )
+    # Build a Task Scheduler XML with two triggers:
+    #   1) daily at the configured time
+    #   2) on every user logon
+    # This ensures that if the PC is off at 9:00, the bot runs the next
+    # time the user logs in, while the once-per-day guard in run_daily.py
+    # prevents duplicate runs.
+    today = datetime.now().strftime("%Y-%m-%d")
+    start_boundary = f"{today}T{run_time}:00"
+    cmd = f'"{python_exe}"'
+    args = f'"{run_daily}"'
+    working_dir = str(ROOT_DIR)
+
+    xml = f"""<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>internship-bot daily run</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>{start_boundary}</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>{escape(cmd)}</Command>
+      <Arguments>{escape(args)}</Arguments>
+      <WorkingDirectory>{escape(working_dir)}</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"""
+
+    xml_path = ""
 
     try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".xml", encoding="utf-16", delete=False
+        ) as f:
+            f.write(xml)
+            xml_path = f.name
+
+        # Delete any existing task first, then create from XML.
+        delete_cmd = 'schtasks /delete /tn "internship-bot-daily" /f'
+        subprocess.run(delete_cmd, shell=True, capture_output=True, text=True, check=False)
+
+        create_cmd = f'schtasks /create /xml "{xml_path}" /tn "internship-bot-daily" /f'
         result = subprocess.run(
-            command,
+            create_cmd,
             shell=True,
             capture_output=True,
             text=True,
             check=False,
         )
+
         if result.returncode == 0:
             console.print(
-                f"[bold green]Success![/] Scheduled task created. It will run daily at {run_time}."
+                f"[bold green]Success![/] Scheduled task created. "
+                f"It will run daily at {run_time} and on every logon."
             )
         else:
             console.print("[bold red]Could not create the scheduled task.[/]")
@@ -313,11 +376,21 @@ def _install_task(current: dict[str, str]) -> None:
             if result.stderr:
                 console.print(result.stderr)
             console.print(
-                "\n[yellow]You can create it manually by running this as Administrator:[/]"
+                "\n[yellow]You can create it manually as Administrator using Task Scheduler:[/]"
             )
-            console.print(f"[dim]{command}[/]")
+            console.print(
+                "[dim]Create a task with two triggers: a daily schedule at {run_time} "
+                f"and an 'At log on' trigger, both running:[/]"
+            )
+            console.print(f"[dim]{cmd} {args}[/]")
     except FileNotFoundError:
         console.print("[red]schtasks not found. Please create the task manually.[/]")
+    finally:
+        try:
+            if xml_path:
+                Path(xml_path).unlink()
+        except Exception:
+            pass
 
     input("\nPress Enter to continue...")
 
