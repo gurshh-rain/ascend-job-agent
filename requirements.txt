@@ -1,0 +1,9 @@
+requests
+beautifulsoup4
+python-dotenv
+fastapi
+uvicorn
+jinja2
+pandas
+questionary
+rich

@@ -1,0 +1,36 @@
+# Secrets / environment
+config/.env
+.env
+.env.*
+
+# Generated data
+internships.csv
+data/*.csv
+data/*.json
+data/*.log
+*.log
+*.bak
+*.bak_*
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Downloaded tools
+cloudflared.exe
+cloudflared
