@@ -23,6 +23,8 @@ import html
 import json
 import re
 import sys
+import time
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -44,6 +46,22 @@ from config import settings
 
 
 TRACKING_PARAMS = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "ref", "source", "src"}
+
+DEFAULT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/121.0.0.0 Safari/537.36"
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/webp,*/*;q=0.8"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "DNT": "1",
+    "Connection": "keep-alive",
+}
 
 
 def _log(msg: str) -> None:
@@ -73,11 +91,11 @@ def listing_id(company: str, role: str, link: str | None) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
-def fetch(url: str, timeout: int = 30) -> str | None:
+def fetch(url: str, timeout: int = 30, headers: dict[str, str] | None = None) -> str | None:
     """Fetch a URL, logging any failures but not raising."""
     try:
         _log(f"Fetching {url}")
-        response = requests.get(url, timeout=timeout)
+        response = requests.get(url, timeout=timeout, headers=headers)
         response.raise_for_status()
         return response.text
     except Exception as exc:
@@ -86,10 +104,16 @@ def fetch(url: str, timeout: int = 30) -> str | None:
 
 
 def guess_source_type(text: str, url: str) -> str:
-    """Guess whether the content is a JSON feed, HTML table, or markdown table."""
-    if url.endswith(".json") or text.strip().startswith(("{", "[")):
+    """Guess whether the content is a JSON feed, RSS/Atom, HTML, or markdown table."""
+    stripped = text.strip().lower()
+    if url.endswith(".json") or stripped.startswith(("{", "[")):
         return "json"
-    if "<table" in text.lower():
+    if stripped.startswith("<?xml") or stripped.startswith(("<rss", "<feed")):
+        return "rss"
+    # Markdown tables have pipe-separated rows and a separator like |---|---|.
+    if re.search(r"^\s*\|[-:\s|]+\|\s*$", text, re.MULTILINE):
+        return "markdown"
+    if stripped.startswith(("<html", "<!doctype html", "<table")) or "<table" in text.lower():
         return "html"
     return "markdown"
 
@@ -571,13 +595,425 @@ def _parse_hn_algolia(story_search_text: str, source_name: str) -> list[dict[str
     return listings
 
 
+# ---------------------------------------------------------------------------
+# New source parsers (RSS, generic HTML/JSON-LD, LinkedIn, Indeed, etc.)
+# ---------------------------------------------------------------------------
+
+
+def _parse_rss(text: str, source_name: str) -> list[dict[str, Any]]:
+    """Parse RSS 2.0 or Atom feeds into raw listings."""
+    listings: list[dict[str, Any]] = []
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError as exc:
+        _log(f"RSS parse error for {source_name}: {exc}")
+        return listings
+
+    if root.tag.endswith("feed"):
+        # Atom feed
+        entries = root.findall(".//{http://www.w3.org/2005/Atom}entry")
+    else:
+        # RSS 2.0
+        entries = root.findall(".//item")
+
+    for entry in entries:
+        title = ""
+        title_el = entry.find("title")
+        if title_el is not None and title_el.text:
+            title = html.unescape(title_el.text.strip())
+
+        link = ""
+        if root.tag.endswith("feed"):
+            link_el = entry.find("{http://www.w3.org/2005/Atom}link")
+            if link_el is not None:
+                link = link_el.get("href", "") or ""
+        else:
+            link_el = entry.find("link")
+            if link_el is not None:
+                link = (link_el.text or "").strip()
+
+        description = ""
+        desc_el = entry.find("description") or entry.find("summary") or entry.find("content")
+        if desc_el is not None and desc_el.text:
+            description = BeautifulSoup(desc_el.text, "html.parser").get_text(" ", strip=True)
+            description = html.unescape(description)[:500]
+
+        date_posted = ""
+        date_el = entry.find("pubDate") or entry.find("published") or entry.find("updated")
+        if date_el is not None and date_el.text:
+            date_posted = date_el.text.strip()[:30]
+
+        # Try to split "Role at Company" or "Company - Role" from the title.
+        company, role = "", ""
+        if " at " in title:
+            role, company = title.split(" at ", 1)
+        elif title and " - " in title:
+            parts = title.split(" - ", 1)
+            # Heuristic: if second part is short/capitalized, it's the company.
+            company, role = parts[1], parts[0]
+        else:
+            role = title
+
+        company = _clean_company(company)
+        if not company and description:
+            # Fallback: look for "Company: ..." in description.
+            m = re.search(r"(?:company|employer|organization)\s*[:\-]\s*([^\n\r,]+)", description, re.IGNORECASE)
+            if m:
+                company = _clean_company(m.group(1))
+
+        location = ""
+        loc_match, canonical = settings.location_matches_target(description or title)
+        if loc_match:
+            location = canonical or ""
+
+        raw_text = (
+            f"Company: {company} | Role: {role} | Location: {location} "
+            f"| Link: {link} | Posted: {date_posted} | Description: {description[:200]}"
+        )
+
+        listings.append({
+            "company": company,
+            "role": role or title,
+            "location": location,
+            "link": link or None,
+            "date_posted": date_posted,
+            "skills": [],
+            "source": source_name,
+            "raw_text": raw_text,
+            "_id": listing_id(company, role or title, link),
+        })
+
+    return listings
+
+
+def _extract_jsonld_job_postings(soup: BeautifulSoup) -> list[dict[str, Any]]:
+    """Extract job postings from schema.org JSON-LD embedded in HTML."""
+    listings: list[dict[str, Any]] = []
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.get_text(strip=True))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        items = data if isinstance(data, list) else [data]
+        for item in items:
+            types = item.get("@type") or []
+            if isinstance(types, str):
+                types = [types]
+            if not any("JobPosting" in t for t in types):
+                continue
+
+            role = (item.get("title") or "").strip()
+            if not role:
+                continue
+
+            company = ""
+            org = item.get("hiringOrganization") or {}
+            if isinstance(org, dict):
+                company = (org.get("name") or "").strip()
+            elif isinstance(org, str):
+                company = org.strip()
+
+            location = ""
+            loc = item.get("jobLocation") or {}
+            if isinstance(loc, list):
+                loc = loc[0] if loc else {}
+            if isinstance(loc, dict):
+                address = loc.get("address") or {}
+                if isinstance(address, dict):
+                    parts = [
+                        address.get("addressLocality"),
+                        address.get("addressRegion"),
+                        address.get("addressCountry"),
+                    ]
+                    location = ", ".join(p for p in parts if p)
+                elif isinstance(address, str):
+                    location = address
+
+            link = ""
+            if item.get("url"):
+                link = item.get("url").strip()
+            elif item.get("directApply"):
+                link = str(item.get("directApply")).strip()
+
+            date_posted = (item.get("datePosted") or "").strip()[:30]
+            deadline = (item.get("validThrough") or "").strip()[:30] or None
+
+            raw_text = json.dumps(item, ensure_ascii=False, indent=2)[:2000]
+
+            listings.append({
+                "company": company,
+                "role": role,
+                "location": location,
+                "link": link or None,
+                "date_posted": date_posted,
+                "skills": [],
+                "source": "JSON-LD",
+                "raw_text": raw_text,
+                "_id": listing_id(company, role, link),
+            })
+
+    return listings
+
+
+def _extract_html_job_cards(soup: BeautifulSoup, url: str, source_name: str) -> list[dict[str, Any]]:
+    """Heuristic fallback: find links and headings that mention intern/coop."""
+    listings: list[dict[str, Any]] = []
+    parsed = urlparse(url)
+    site = parsed.netloc.replace("www.", "")
+
+    # Find all clickable job-like titles.
+    intern_pattern = re.compile(r"\b(intern|co-op|coop|work term|workterm)\b", re.IGNORECASE)
+
+    seen: set[str] = set()
+    for a in soup.find_all("a", href=True):
+        text = a.get_text(" ", strip=True)
+        if not text or not intern_pattern.search(text):
+            continue
+
+        href = a["href"].strip()
+        if not href.startswith("http"):
+            href = urlunparse(parsed._replace(path=href if href.startswith("/") else "/" + href))
+        href = normalize_url(href)
+        if not href or href in seen:
+            continue
+        seen.add(href)
+
+        role = text[:160]
+        company = _clean_company(site)
+
+        # Try to find a nearby heading/company name in the page.
+        parent = a.find_parent(["li", "div", "tr", "article"])
+        snippet = ""
+        if parent:
+            snippet = parent.get_text(" ", strip=True)[:400]
+            m = re.search(r"(?:at|@)\s+([A-Z][A-Za-z0-9\s&]+)", snippet)
+            if m:
+                company = _clean_company(m.group(1))
+
+        loc_match, canonical = settings.location_matches_target(snippet or text)
+        location = canonical or ""
+
+        raw_text = (
+            f"Company: {company} | Role: {role} | Location: {location} "
+            f"| Link: {href} | Snippet: {snippet[:200]}"
+        )
+
+        listings.append({
+            "company": company,
+            "role": role,
+            "location": location,
+            "link": href,
+            "date_posted": "",
+            "skills": [],
+            "source": source_name,
+            "raw_text": raw_text,
+            "_id": listing_id(company, role, href),
+        })
+
+    return listings
+
+
+def _parse_generic_html(text: str, url: str, source_name: str) -> list[dict[str, Any]]:
+    """Parse generic career pages / job board HTML.
+
+    Tries schema.org JSON-LD first, then falls back to heuristic link extraction.
+    """
+    soup = BeautifulSoup(text, "html.parser")
+    listings = _extract_jsonld_job_postings(soup)
+    if listings:
+        return listings
+    return _extract_html_job_cards(soup, url, source_name)
+
+
+def _parse_linkedin(url: str) -> list[dict[str, Any]]:
+    """Scrape LinkedIn job search via the public guest API.
+
+    Experimental: LinkedIn rate-limits heavily, so this may return few or no
+    results. Supports both /jobs/search?... URLs and the guest API directly.
+    """
+    listings: list[dict[str, Any]] = []
+    parsed = urlparse(url)
+    if parsed.netloc != "www.linkedin.com":
+        return listings
+
+    query = parse_qs(parsed.query)
+    if parsed.path.startswith("/jobs-guest/jobs/api/seeMoreJobPostings"):
+        base_url = urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
+    else:
+        # Convert a normal search URL into the guest API.
+        keywords = query.get("keywords", [""])[0]
+        location = query.get("location", [""])[0]
+        geo_id = query.get("geoId", [""])[0]
+        f_e = query.get("f_E", [""])[0]
+        f_i = query.get("f_I", [""])[0]
+        qd = {k: v[0] for k, v in query.items() if k not in ("start",) and v[0]}
+        qd["keywords"] = keywords or "software engineering intern"
+        if location:
+            qd["location"] = location
+        base_url = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?" + urlencode(qd, doseq=True)
+
+    for start in [0, 25, 50, 75, 100]:
+        page_url = f"{base_url}&start={start}" if "?" in base_url else f"{base_url}?start={start}"
+        if "&start=" in base_url:
+            page_url = re.sub(r"[?&]start=\d+", f"&start={start}", base_url)
+
+        text = fetch(page_url, headers=DEFAULT_HEADERS)
+        if not text:
+            break
+
+        if "HTTP 999" in text or "captcha" in text.lower():
+            _log("LinkedIn returned a bot/captcha block. Stopping LinkedIn scrape.")
+            break
+
+        soup = BeautifulSoup(text, "html.parser")
+        cards = soup.find_all("li")
+        if not cards:
+            break
+
+        found_on_page = 0
+        for card in cards:
+            title_el = card.select_one("h3.base-search-card__title")
+            company_el = card.select_one("h4.base-search-card__subtitle")
+            loc_el = card.select_one("span.base-search-card__metadata")
+            link_el = card.select_one("a.base-card__full-link") or card.find("a", href=True)
+
+            if not title_el:
+                continue
+
+            role = title_el.get_text(strip=True)
+            company = _clean_company(company_el.get_text(strip=True)) if company_el else ""
+            location = loc_el.get_text(strip=True) if loc_el else ""
+            link = link_el["href"].strip() if link_el and link_el.get("href") else ""
+
+            if not company:
+                company = _clean_company("LinkedIn")
+
+            raw_text = (
+                f"Company: {company} | Role: {role} | Location: {location} "
+                f"| Link: {link} | Source: LinkedIn"
+            )
+
+            listings.append({
+                "company": company,
+                "role": role,
+                "location": location,
+                "link": link or None,
+                "date_posted": "",
+                "skills": [],
+                "source": "LinkedIn",
+                "raw_text": raw_text,
+                "_id": listing_id(company, role, link),
+            })
+            found_on_page += 1
+
+        if found_on_page < 5:
+            # Likely at the end of results or blocked.
+            break
+
+        time.sleep(0.5)
+
+    return listings
+
+
+def _parse_indeed(url: str) -> list[dict[str, Any]]:
+    """Attempt to parse Indeed job search results.
+
+    Indeed uses bot protection, so this is best-effort and often returns nothing.
+    """
+    listings: list[dict[str, Any]] = []
+    text = fetch(url, headers=DEFAULT_HEADERS)
+    if not text:
+        return listings
+
+    # Try the embedded JSON payload first.
+    match = re.search(
+        r'window\.mosaic\.providerData\["mosaic-provider-jobcards"\]=(\{.+?\});',
+        text,
+    )
+    if match:
+        try:
+            data = json.loads(match.group(1))
+            results = data.get("metaData", {}).get("mosaicProviderJobCardsModel", {}).get("results", [])
+            for job in results:
+                role = (job.get("title") or "").strip()
+                company = (job.get("company") or "").strip()
+                location = (job.get("formattedLocation") or "").strip()
+                job_key = (job.get("jobkey") or "").strip()
+                link = f"https://www.indeed.com/viewjob?jk={job_key}" if job_key else ""
+
+                listings.append({
+                    "company": company,
+                    "role": role,
+                    "location": location,
+                    "link": link or None,
+                    "date_posted": "",
+                    "skills": [],
+                    "source": "Indeed",
+                    "raw_text": json.dumps(job, ensure_ascii=False, indent=2)[:2000],
+                    "_id": listing_id(company, role, link),
+                })
+            if listings:
+                return listings
+        except Exception as exc:
+            _log(f"Indeed JSON parse failed: {exc}")
+
+    # Fallback to HTML selectors.
+    soup = BeautifulSoup(text, "html.parser")
+    for card in soup.find_all("div", class_=re.compile(r"jobCard|jobSeen|slider_container")):
+        title_el = card.find("h2", class_="jobTitle") or card.find("a", id=re.compile(r"job_"))
+        if not title_el:
+            continue
+        role = title_el.get_text(strip=True)
+        company_el = card.find(attrs={"data-testid": "company-name"}) or card.find("span", class_=re.compile(r"companyName"))
+        company = company_el.get_text(strip=True) if company_el else ""
+        loc_el = card.find(attrs={"data-testid": "text-location"}) or card.find("div", class_=re.compile(r"companyLocation"))
+        location = loc_el.get_text(strip=True) if loc_el else ""
+        link_el = title_el if title_el.name == "a" else title_el.find("a", href=True)
+        link = link_el["href"].strip() if link_el and link_el.get("href") else ""
+
+        listings.append({
+            "company": company,
+            "role": role,
+            "location": location,
+            "link": link or None,
+            "date_posted": "",
+            "skills": [],
+            "source": "Indeed",
+            "raw_text": f"Company: {company} | Role: {role} | Location: {location}",
+            "_id": listing_id(company, role, link),
+        })
+
+    return listings
+
+
+def _parse_unsupported(url: str, name: str, reason: str) -> list[dict[str, Any]]:
+    """Log a clear warning for sources that need authentication or heavy bot work."""
+    _log(f"{name} is not directly supported ({reason}): {url}")
+    return []
+
+
 def scrape_one_source(url: str) -> list[dict[str, Any]]:
     """Fetch and parse one source URL, returning canonical raw listings."""
+    parsed = urlparse(url)
+
+    # LinkedIn job search / guest API.
+    if parsed.netloc == "www.linkedin.com":
+        return _parse_linkedin(url)
+
+    # Indeed job search.
+    if parsed.netloc.endswith("indeed.com"):
+        return _parse_indeed(url)
+
+    # Glassdoor and Handshake are too bot/login-heavy for simple requests.
+    if parsed.netloc.endswith("glassdoor.com"):
+        return _parse_unsupported(url, "Glassdoor", "requires login / heavy bot protection")
+    if parsed.netloc.endswith("joinhandshake.com"):
+        return _parse_unsupported(url, "Handshake", "requires .edu login")
+
     text = fetch(url)
     if text is None:
         return []
-
-    parsed = urlparse(url)
 
     # Hacker News "Who is hiring?" thread (non-GitHub source).
     if parsed.netloc == "hn.algolia.com" and "whoishiring" in url.lower():
@@ -591,6 +1027,9 @@ def scrape_one_source(url: str) -> list[dict[str, Any]]:
     else:
         source_name = parsed.netloc or url
     source_type = guess_source_type(text, url)
+
+    if source_type == "rss":
+        return _parse_rss(text, source_name)
 
     if source_type == "json":
         try:
@@ -608,21 +1047,38 @@ def scrape_one_source(url: str) -> list[dict[str, Any]]:
             return []
 
     if source_type == "html":
-        return _parse_html_tables(text, source_name)
+        # HTML tables (e.g. SimplifyJobs README) take priority.
+        table_listings = _parse_html_tables(text, source_name)
+        if table_listings:
+            return table_listings
+        # Career pages and job boards are usually generic HTML, not tables.
+        return _parse_generic_html(text, url, source_name)
 
     return _parse_markdown_tables(text, source_name)
 
 
-def get_raw_listings(source_urls: list[str] | None = None) -> list[dict[str, Any]]:
+def get_raw_listings(
+    source_urls: list[str] | None = None,
+    progress: Any = None,
+    task_id: Any = None,
+) -> list[dict[str, Any]]:
     """Fetch and normalize raw listings from all configured sources."""
     if source_urls is None:
-        source_urls = settings.SCRAPE_SOURCE_URLS
+        source_urls = list(settings.SCRAPE_SOURCE_URLS)
+        source_urls.extend(settings.RSS_FEEDS)
+        source_urls.extend(settings.COMPANY_CAREER_URLS)
+        source_urls.extend(settings.LINKEDIN_SEARCH_URLS)
+
+    if progress is not None and task_id is not None:
+        progress.update(task_id, total=len(source_urls))
 
     all_listings: list[dict[str, Any]] = []
-    for url in source_urls:
+    for i, url in enumerate(source_urls, start=1):
         listings = scrape_one_source(url)
         _log(f"{url} -> {len(listings)} raw rows")
         all_listings.extend(listings)
+        if progress is not None and task_id is not None:
+            progress.advance(task_id)
 
     # Deduplicate by id, then by (company, role, location) for same posting with different links.
     by_id: dict[str, dict[str, Any]] = {}

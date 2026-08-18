@@ -96,6 +96,9 @@ Optional but useful:
 | `OLLAMA_MODEL` | `qwen2.5:7b` | Local LLM model used for filtering |
 | `DAILY_RUN_TIME` | `09:00` | Time used when installing the scheduled task |
 | `SCRAPE_SOURCE_URLS` | 17 built-in sources | Comma-separated URLs to scrape |
+| `RSS_FEEDS` | (empty) | RSS/Atom job feeds |
+| `COMPANY_CAREER_URLS` | (empty) | Company career pages or job boards with HTML/JSON-LD |
+| `LINKEDIN_SEARCH_URLS` | (empty) | LinkedIn search URLs (experimental) |
 
 ## Configuration with the terminal UI
 
@@ -280,6 +283,11 @@ You can add or remove sources by editing `SCRAPE_SOURCE_URLS` in `config/.env` a
 - raw GitHub markdown READMEs
 - HTML tables
 - JSON feeds where the top level is a list of job objects
+- RSS/Atom feeds (set `RSS_FEEDS`)
+- Company career pages and job boards with JSON-LD or HTML links (set `COMPANY_CAREER_URLS`)
+- LinkedIn search URLs, copied from the browser (set `LINKEDIN_SEARCH_URLS`; experimental, may be rate-limited)
+
+Glassdoor and Handshake are not supported because they require login.
 
 ## Updating search filters
 

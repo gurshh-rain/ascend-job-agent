@@ -135,6 +135,8 @@ def filter_listings(
     raw_listings: list[dict[str, Any]],
     fast_pre_filter: bool = True,
     progress_every: int = 10,
+    progress: Any = None,
+    task_id: Any = None,
 ) -> list[dict[str, Any]]:
     """
     Run each raw listing through the local LLM and return the ones that are
@@ -145,12 +147,23 @@ def filter_listings(
         fast_pre_filter: If True, skip rows that don't contain any target role
             keyword or target location alias before calling the LLM.
         progress_every: Print a progress log every N LLM calls.
+        progress: Optional rich.progress.Progress instance to update.
+        task_id: Task ID in the Progress instance.
     """
     results: list[dict[str, Any]] = []
     llm_calls = 0
     max_llm_calls = settings.MAX_LLM_CALLS
 
-    for idx, raw in enumerate(raw_listings, start=1):
+    if progress is not None and task_id is not None:
+        iterator = progress.track(
+            enumerate(raw_listings, start=1),
+            task_id=task_id,
+            total=len(raw_listings),
+        )
+    else:
+        iterator = enumerate(raw_listings, start=1)
+
+    for idx, raw in iterator:
         if fast_pre_filter:
             passes, reason = _pre_filter(raw)
             if not passes:

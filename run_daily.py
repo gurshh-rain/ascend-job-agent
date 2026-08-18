@@ -25,6 +25,15 @@ from mailer.emailer import send_digest
 from llm.llm_filter import filter_listings
 from scraper.scraper import get_raw_listings
 from server.tunnel import ensure_server_and_tunnel
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -111,61 +120,83 @@ def _load_deferred(sent_log: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def main(dry_run: bool = False, limit: int | None = None) -> None:
+    console = Console()
     settings.ensure_data_files_exist()
 
-    print("=" * 60)
-    print("internship-bot daily run started")
+    console.print("=" * 60)
+    console.print("internship-bot daily run started")
     if dry_run:
-        print("(dry run — no email will be sent)")
+        console.print("(dry run — no email will be sent)")
     if limit:
-        print(f"(limiting to first {limit} raw listings for testing)")
-    print("=" * 60)
+        console.print(f"(limiting to first {limit} raw listings for testing)")
+    console.print("=" * 60)
 
-    # 1. Scrape all configured sources.
-    raw_listings = get_raw_listings()
-    if limit:
-        raw_listings = raw_listings[:limit]
-    print(f"[run_daily] {len(raw_listings)} raw listings found from all sources")
-
-    # 2. LLM filter: role, season, and target location (GTA / CA / NYC).
-    # fast_pre_filter skips obvious non-matches before calling the local model.
-    relevant = filter_listings(raw_listings, fast_pre_filter=True)
-    print(f"[run_daily] {len(relevant)} listings passed LLM filter")
-
-    # 3. Drop anything already emailed/approved/rejected and merge any
-    #    deferred (queued) listings from the previous run.
-    sent_log = _load_json(settings.SENT_LOG_FILE)
-
-    # Remove stale deferred entries that the fresh scrape is about to replace.
-    _cleanup_stale_deferred(sent_log, relevant)
-    if not dry_run:
-        _save_json(settings.SENT_LOG_FILE, sent_log)
-
-    new_relevant = [l for l in relevant if _is_new(l, sent_log)]
-    deferred = _load_deferred(sent_log)
-
-    # Combine fresh relevant listings first, then the deferred queue.
-    candidates = settings.deduplicate_listings(new_relevant + deferred)
-    # Sort by skill match (if configured), then newest first.
-    candidates.sort(
-        key=lambda l: (
-            -int(l.get("matches_skills", True)),
-            _age_days(l.get("date_posted", "")),
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        # 1. Scrape all configured sources.
+        scrape_task = progress.add_task(
+            "[cyan]Scraping sources...", total=len(settings.SCRAPE_SOURCE_URLS)
         )
-    )
+        raw_listings = get_raw_listings(progress=progress, task_id=scrape_task)
+        if limit:
+            raw_listings = raw_listings[:limit]
+        console.print(f"\\[run_daily] {len(raw_listings)} raw listings found from all sources")
 
-    print(f"[run_daily] {len(new_relevant)} fresh + {len(deferred)} queued = {len(candidates)} candidate listing(s)")
+        # 2. LLM filter: role, season, and target location (GTA / CA / NYC).
+        # fast_pre_filter skips obvious non-matches before calling the local model.
+        filter_task = progress.add_task(
+            "[green]Filtering with LLM...", total=len(raw_listings)
+        )
+        relevant = filter_listings(
+            raw_listings, fast_pre_filter=True, progress=progress, task_id=filter_task
+        )
+        console.print(f"\\[run_daily] {len(relevant)} listings passed LLM filter")
 
-    # 4. Send digest if there are candidates.
-    if not candidates:
-        print("[run_daily] Zero listings to send. Skipping email.")
-        return
+        # 3. Drop anything already emailed/approved/rejected and merge any
+        #    deferred (queued) listings from the previous run.
+        dedup_task = progress.add_task("[blue]Deduplicating...", total=None)
+        sent_log = _load_json(settings.SENT_LOG_FILE)
 
-    max_listings = settings.MAX_DAILY_LISTINGS
-    if max_listings:
-        print(f"[run_daily] Daily cap is {max_listings}; sending up to that many.")
-    send_digest(candidates, dry_run=dry_run, max_listings=max_listings or None)
-    print("[run_daily] Done.")
+        # Remove stale deferred entries that the fresh scrape is about to replace.
+        _cleanup_stale_deferred(sent_log, relevant)
+        if not dry_run:
+            _save_json(settings.SENT_LOG_FILE, sent_log)
+
+        new_relevant = [l for l in relevant if _is_new(l, sent_log)]
+        deferred = _load_deferred(sent_log)
+
+        # Combine fresh relevant listings first, then the deferred queue.
+        candidates = settings.deduplicate_listings(new_relevant + deferred)
+        # Sort by skill match (if configured), then newest first.
+        candidates.sort(
+            key=lambda l: (
+                -int(l.get("matches_skills", True)),
+                _age_days(l.get("date_posted", "")),
+            )
+        )
+        progress.update(dedup_task, completed=1, total=1)
+
+        console.print(f"\\[run_daily] {len(new_relevant)} fresh + {len(deferred)} queued = {len(candidates)} candidate listing(s)")
+
+        # 4. Send digest if there are candidates.
+        if not candidates:
+            console.print("\\[run_daily] Zero listings to send. Skipping email.")
+            return
+
+        email_task = progress.add_task("[magenta]Preparing email...", total=None)
+        max_listings = settings.MAX_DAILY_LISTINGS
+        if max_listings:
+            console.print(f"\\[run_daily] Daily cap is {max_listings}; sending up to that many.")
+        send_digest(candidates, dry_run=dry_run, max_listings=max_listings or None)
+        progress.update(email_task, completed=1, total=1)
+
+    console.print("\\[run_daily] Done.")
 
 
 def cli() -> None:

@@ -88,6 +88,25 @@ SCRAPE_SOURCE_URLS = [
     if u.strip()
 ]
 
+# Optional extra sources for job boards, RSS feeds, company career pages, etc.
+RSS_FEEDS = [
+    u.strip()
+    for u in os.getenv("RSS_FEEDS", "").split(",")
+    if u.strip()
+]
+COMPANY_CAREER_URLS = [
+    u.strip()
+    for u in os.getenv("COMPANY_CAREER_URLS", "").split(",")
+    if u.strip()
+]
+
+# LinkedIn search URLs are experimental and often rate-limited.
+LINKEDIN_SEARCH_URLS = [
+    u.strip()
+    for u in os.getenv("LINKEDIN_SEARCH_URLS", "").split(",")
+    if u.strip()
+]
+
 # --- Search filters ---
 TARGET_ROLE_KEYWORDS = [
     kw.strip().lower()
