@@ -187,8 +187,8 @@ def _prompt_filters() -> tuple[list[str], list[str], list[str], str]:
     )
 
 
-def _prompt_daily_settings() -> tuple[int, int, str]:
-    """Prompt for daily caps and run time."""
+def _prompt_daily_settings() -> tuple[int, int, int, str]:
+    """Prompt for daily caps, listing age limit, and run time."""
     print("\n[setup] Daily run settings")
     max_daily = questionary.text(
         "Max listings to send per email:",
@@ -202,13 +202,19 @@ def _prompt_daily_settings() -> tuple[int, int, str]:
         validate=lambda t: t.isdigit() or "Please enter a number",
     ).unsafe_ask()
 
+    max_age = questionary.text(
+        "Ignore listings older than this many days (0 = no limit):",
+        default=str(settings.MAX_LISTING_AGE_DAYS or 14),
+        validate=lambda t: t.isdigit() or "Please enter a number",
+    ).unsafe_ask()
+
     run_time = questionary.text(
         "Daily run time (HH:MM, 24h):",
         default=settings.DAILY_RUN_TIME or "09:00",
         validate=lambda t: bool(re.match(r"^\d{2}:\d{2}$", t)) or "Use HH:MM",
     ).unsafe_ask()
 
-    return int(max_daily), int(max_llm), run_time
+    return int(max_daily), int(max_llm), int(max_age), run_time
 
 
 def _confirm_and_save(config: dict[str, Any]) -> None:
@@ -237,6 +243,7 @@ def _confirm_and_save(config: dict[str, Any]) -> None:
     _save_env("TARGET_SEASON", config["target_season"])
     _save_int("MAX_DAILY_LISTINGS", config["max_daily"])
     _save_int("MAX_LLM_CALLS", config["max_llm"])
+    _save_int("MAX_LISTING_AGE_DAYS", config["max_age"])
     _save_env("DAILY_RUN_TIME", config["run_time"])
 
     # Reload dotenv so the file is fully up to date for the rest of the process.
@@ -256,7 +263,7 @@ def run_setup() -> None:
     ollama_host, ollama_model = _prompt_ollama()
     smtp_user, smtp_password, email_from, email_to = _prompt_email()
     role_keywords, target_locations, target_skills, target_season = _prompt_filters()
-    max_daily, max_llm, run_time = _prompt_daily_settings()
+    max_daily, max_llm, max_age, run_time = _prompt_daily_settings()
 
     config = {
         "ollama_host": ollama_host,
@@ -271,6 +278,7 @@ def run_setup() -> None:
         "target_season": target_season,
         "max_daily": max_daily,
         "max_llm": max_llm,
+        "max_age": max_age,
         "run_time": run_time,
     }
 

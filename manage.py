@@ -20,9 +20,10 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 import questionary
+from config import settings
 from config.setup_wizard import ensure_setup
 import requests
-from dotenv import get_key, set_key
+from dotenv import dotenv_values, set_key
 from prompt_toolkit.styles import Style as PTStyle
 from rich.console import Console
 from rich.panel import Panel
@@ -88,11 +89,22 @@ SETTINGS: dict[str, dict[str, str]] = {
         "label": "Daily run time",
         "help": "24-hour time (HH:MM) used when installing the Windows scheduled task.",
     },
+    "MAX_LISTING_AGE_DAYS": {
+        "label": "Max listing age (days)",
+        "help": "Ignore listings posted more than this many days ago. 0 means no age limit.",
+    },
 }
 
 
 def _get_current() -> dict[str, str]:
-    return {key: (get_key(str(ENV_PATH), key) or "") for key in SETTINGS}
+    env = dotenv_values(str(ENV_PATH)) if ENV_PATH.exists() else {}
+
+    def _value(key: str) -> str:
+        if key in env and env[key] is not None:
+            return env[key]
+        return str(getattr(settings, key, ""))
+
+    return {key: _value(key) for key in SETTINGS}
 
 
 def _save(key: str, value: str) -> None:

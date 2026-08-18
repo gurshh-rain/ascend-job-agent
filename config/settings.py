@@ -122,6 +122,8 @@ MAX_DAILY_LISTINGS = int(os.getenv("MAX_DAILY_LISTINGS", "0"))
 MAX_LLM_CALLS = int(os.getenv("MAX_LLM_CALLS", "0"))
 # Time of day to run (HH:MM, 24h). Used by the Task Scheduler setup in manage.py.
 DAILY_RUN_TIME = os.getenv("DAILY_RUN_TIME", "09:00")
+# Ignore listings posted more than this many days ago. 0 means no age limit.
+MAX_LISTING_AGE_DAYS = int(os.getenv("MAX_LISTING_AGE_DAYS", "14"))
 
 # Target locations (GTA, California, NYC) and aliases used for fast pre-filtering.
 # The LLM does the final location classification, but these keywords let us skip

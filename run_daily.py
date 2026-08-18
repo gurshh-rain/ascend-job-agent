@@ -119,6 +119,15 @@ def _load_deferred(sent_log: dict[str, Any]) -> list[dict[str, Any]]:
     return deferred
 
 
+def _is_fresh(listing: dict[str, Any]) -> bool:
+    """Return True if the listing is within the configured max age."""
+    max_age = settings.MAX_LISTING_AGE_DAYS
+    if max_age <= 0:
+        return True
+    age = _age_days(listing.get("date_posted", ""))
+    return age <= max_age
+
+
 def _already_ran_today() -> bool:
     """Return True if the bot already successfully ran today."""
     sent_log = _load_json(settings.SENT_LOG_FILE)
@@ -177,7 +186,13 @@ def main(dry_run: bool = False, limit: int | None = None) -> None:
         relevant = filter_listings(
             raw_listings, fast_pre_filter=True, progress=progress, task_id=filter_task
         )
-        console.print(f"\\[run_daily] {len(relevant)} listings passed LLM filter")
+
+        # Drop listings that are older than the configured age limit.
+        if settings.MAX_LISTING_AGE_DAYS > 0:
+            relevant = [l for l in relevant if _is_fresh(l)]
+            console.print(f"\\[run_daily] {len(relevant)} fresh listings within the last {settings.MAX_LISTING_AGE_DAYS} days")
+        else:
+            console.print(f"\\[run_daily] {len(relevant)} listings passed LLM filter")
 
         # 3. Drop anything already emailed/approved/rejected and merge any
         #    deferred (queued) listings from the previous run.
@@ -191,6 +206,8 @@ def main(dry_run: bool = False, limit: int | None = None) -> None:
 
         new_relevant = [l for l in relevant if _is_new(l, sent_log)]
         deferred = _load_deferred(sent_log)
+        if settings.MAX_LISTING_AGE_DAYS > 0:
+            deferred = [l for l in deferred if _is_fresh(l)]
 
         # Combine fresh relevant listings first, then the deferred queue.
         candidates = settings.deduplicate_listings(new_relevant + deferred)

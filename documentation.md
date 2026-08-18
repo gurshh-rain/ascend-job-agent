@@ -92,6 +92,7 @@ Optional but useful:
 | `TARGET_SEASON` | `Summer 2027` | Internship season to look for |
 | `MAX_DAILY_LISTINGS` | `25` | Max listings per email. `0` means no cap. Extra are queued. |
 | `MAX_LLM_CALLS` | `0` | Max LLM calls per run. `0` means no cap. Use e.g. `300` to keep runs fast. |
+| `MAX_LISTING_AGE_DAYS` | `14` | Ignore listings posted more than this many days ago. `0` means no age limit. |
 | `OLLAMA_HOST` | `http://localhost:11434` | URL of the local Ollama server |
 | `OLLAMA_MODEL` | `qwen2.5:7b` | Local LLM model used for filtering |
 | `DAILY_RUN_TIME` | `09:00` | Time used when installing the scheduled task |
