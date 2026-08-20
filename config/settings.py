@@ -29,7 +29,12 @@ DEFAULT_SCRAPE_SOURCES = [
     "https://raw.githubusercontent.com/jerrylin-23/2027-canada-internships/main/README.md",
     "https://raw.githubusercontent.com/zapplyjobs/Canada-Internships-2027/main/README.md",
     "https://raw.githubusercontent.com/zapplyjobs/Internships-2027/main/README.md",
-    "https://raw.githubusercontent.com/negarprh/Canadian-Tech-Internships-2026/main/README-2027.md",
+    "https://raw.githubusercontent.com/negarprh/Canadian-Tech-Internships-2026/main/README.md",
+    "https://raw.githubusercontent.com/resumax/tech-internships/main/README.md",
+    "https://raw.githubusercontent.com/jerrylin-23/North-America-internships/main/README.md",
+    "https://raw.githubusercontent.com/speedyapply/2027-SWE-College-Jobs/main/INTERN_INTL.md",
+    "https://raw.githubusercontent.com/speedyapply/2027-AI-College-Jobs/main/INTERN_INTL.md",
+    "https://raw.githubusercontent.com/simonesiega/european-tech-internships-2027/main/README.md",
     "https://hn.algolia.com/api/v1/search_by_date?tags=story%2Cauthor_whoishiring&hitsPerPage=20",
     "https://devasheeshg.github.io/yc-api/companies/hiring.json",
 ]

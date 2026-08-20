@@ -261,22 +261,21 @@ By default the bot scrapes:
 - `zshah101` automated 2027 internships JSON feed
 - `ApplyGuy/2027-Internships` JSON feed
 - `sndsh404/summer-2027-internships`
-- `speedyapply/2027-SWE-College-Jobs`
-- `speedyapply/2027-AI-College-Jobs`
+- `speedyapply/2027-SWE-College-Jobs` (USA) and its `INTERN_INTL.md` (international)
+- `speedyapply/2027-AI-College-Jobs` (USA) and its `INTERN_INTL.md` (international)
 - `dreamworkhq/Tech-Internships-2027`
 - `sonak11/internatlas` — 700+ open Summer 2027 roles across categories
 - `aprameyak/2027-tech-jobs` — large community list (also has New Grad and Off-Cycle sections)
 - `SuryaHarikrishnan/internship-tracker` (SWE and Data/AI/ML listings)
 - `jerrylin-23/2027-canada-internships`
+- `jerrylin-23/North-America-internships` — US & Canada rolling/year-round
 - `zapplyjobs/Canada-Internships-2027`
 - `zapplyjobs/Internships-2027`
-- `negarprh/Canadian-Tech-Internships-2026` (`README-2027.md`)
+- `negarprh/Canadian-Tech-Internships-2026`
+- `resumax/tech-internships` — global 2026 & 2027 tech internships
+- `simonesiega/european-tech-internships-2027` — Europe
 - Hacker News "Who is hiring?" monthly thread (via `hn.algolia.com`)
 - `Y Combinator` via `https://devasheeshg.github.io/yc-api/companies/hiring.json` — internship/co-op roles at YC startups
-
-Optional extra sources:
-
-- `speedyapply/2027-SWE-College-Jobs/INTERN_INTL.md` — international roles
 
 If the run gets too slow, remove `sonak11/internatlas` and/or `aprameyak/2027-tech-jobs` or lower `MAX_LLM_CALLS`.
 
