@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-internship-bot = "run_daily:cli"
+internship-bot = "cli:main"
 internship-bot-manage = "manage:main"
 
 [project.urls]
@@ -29,7 +29,7 @@ Homepage = "https://github.com/gurshaan1124/internship-bot"
 Repository = "https://github.com/gurshaan1124/internship-bot"
 
 [tool.setuptools]
-py-modules = ["run_daily", "manage"]
+py-modules = ["run_daily", "manage", "cli", "uninstall"]
 
 [tool.setuptools.packages.find]
 where = ["."]

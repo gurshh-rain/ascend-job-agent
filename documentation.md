@@ -146,6 +146,22 @@ Limit to the first N raw listings for a quick test:
 internship-bot --dry-run --limit 50
 ```
 
+## Uninstall
+
+To remove the installed `internship-bot` package, scheduled task, and optionally your data/config files:
+
+```powershell
+internship-bot remove
+```
+
+It will ask you to type `uninstall`, then:
+
+1. Delete the Windows scheduled task (`internship-bot-daily`).
+2. Run `pip uninstall internship-bot -y` to remove the installed package and console commands.
+3. Ask whether to delete the project folder, data files, and `config/.env`.
+
+The project folder is only deleted if you explicitly confirm it.
+
 ## How the workflow works
 
 ### 1. Data files
