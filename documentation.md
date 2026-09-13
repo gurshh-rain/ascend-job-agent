@@ -96,7 +96,7 @@ Optional but useful:
 | `OLLAMA_HOST` | `http://localhost:11434` | URL of the local Ollama server |
 | `OLLAMA_MODEL` | `qwen2.5:7b` | Local LLM model used for filtering |
 | `DAILY_RUN_TIME` | `09:00` | Time used when installing the scheduled task |
-| `SCRAPE_SOURCE_URLS` | 17 built-in sources | Comma-separated URLs to scrape |
+| `SCRAPE_SOURCE_URLS` | 25 built-in source URLs | Comma-separated URLs to scrape; replaces the full default list |
 | `RSS_FEEDS` | (empty) | RSS/Atom job feeds |
 | `COMPANY_CAREER_URLS` | (empty) | Company career pages or job boards with HTML/JSON-LD |
 | `LINKEDIN_SEARCH_URLS` | (empty) | LinkedIn search URLs (experimental) |
@@ -145,6 +145,20 @@ Limit to the first N raw listings for a quick test:
 ```powershell
 internship-bot --dry-run --limit 50
 ```
+
+## View or clear saved listings
+
+```powershell
+internship-bot list
+internship-bot list --search mechanical
+internship-bot list --limit 20
+internship-bot list --search Toronto --details
+internship-bot erase all
+```
+
+The list command reads the approved listings in `data/internships.csv` without starting the pipeline or server. Search matches text in any column, ignoring case. The default limit is zero (show all); `--details` displays every field, including the application link and ID.
+
+`erase all` displays the file path and number of rows and requires the exact confirmation **ERASE ALL**. Anything else, Ctrl+C, or end-of-input cancels. Clearing preserves CSV headers; it does not change pending listings, sent history, or settings. Already emailed jobs remain marked as sent. Back up the CSV before confirming if you need a copy. If the file changes while the confirmation prompt is open, clearing is cancelled.
 
 ## Uninstall
 
@@ -282,7 +296,8 @@ By default the bot scrapes:
 - `dreamworkhq/Tech-Internships-2027`
 - `sonak11/internatlas` — 700+ open Summer 2027 roles across categories
 - `aprameyak/2027-tech-jobs` — large community list (also has New Grad and Off-Cycle sections)
-- `SuryaHarikrishnan/internship-tracker` (SWE and Data/AI/ML listings)
+- `SuryaHarikrishnan/internship-tracker` (SWE, Data/AI/ML, and Hardware Engineering listings)
+- `jobright-ai/2026-Engineer-Internship` — rolling engineering internships, including mechanical, electrical, hardware, and robotics; includes 2027 roles despite the repository name
 - `jerrylin-23/2027-canada-internships`
 - `jerrylin-23/North-America-internships` — US & Canada rolling/year-round
 - `zapplyjobs/Canada-Internships-2027`
@@ -297,7 +312,16 @@ If the run gets too slow, remove `sonak11/internatlas` and/or `aprameyak/2027-te
 
 The Hacker News source is lightweight (two small Algolia requests) and adds startup roles that rarely appear on GitHub lists.
 
-You can add or remove sources by editing `SCRAPE_SOURCE_URLS` in `config/.env` as a comma-separated list. The bot can handle:
+The two additional engineering feeds were verified live with `scraper.scraper.scrape_one_source` on September 12, 2026 (raw counts before deduplication or filtering):
+
+| Source URL | Parsed listings | Date coverage |
+|------------|-----------------|---------------|
+| `https://raw.githubusercontent.com/SuryaHarikrishnan/internship-tracker/master/listings/hardware-engineering.md` | 528 | 528/528 dated; `2026-02-07` through `2026-09-12` |
+| `https://raw.githubusercontent.com/jobright-ai/2026-Engineer-Internship/master/README.md` | 100 | 100/100 dated; all `Sep 12` (the source omits the year) |
+
+These feeds include mixed seasons and locations. Existing role, season, location, and age filters still apply; raw counts do not represent new matching opportunities. The Jobright feed links to Jobright job pages rather than directly to employer applications. Counts and dates change as the feeds refresh.
+
+You can add or remove sources by editing `SCRAPE_SOURCE_URLS` in `config/.env` as a comma-separated list. This setting **replaces**, rather than extends, `DEFAULT_SCRAPE_SOURCES` in `config/settings.py`. An existing override will not automatically pick up new defaults: append the new URLs to your custom list, or remove the override to use all 25 defaults. An empty override does not restore defaults. The bot can handle:
 
 - raw GitHub markdown READMEs
 - HTML tables

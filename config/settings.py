@@ -26,6 +26,8 @@ DEFAULT_SCRAPE_SOURCES = [
     "https://raw.githubusercontent.com/aprameyak/2027-tech-jobs/main/README.md",
     "https://raw.githubusercontent.com/SuryaHarikrishnan/internship-tracker/master/listings/software-engineering.md",
     "https://raw.githubusercontent.com/SuryaHarikrishnan/internship-tracker/master/listings/data-science-ai-machine-learning.md",
+    "https://raw.githubusercontent.com/SuryaHarikrishnan/internship-tracker/master/listings/hardware-engineering.md",
+    "https://raw.githubusercontent.com/jobright-ai/2026-Engineer-Internship/master/README.md",
     "https://raw.githubusercontent.com/jerrylin-23/2027-canada-internships/main/README.md",
     "https://raw.githubusercontent.com/zapplyjobs/Canada-Internships-2027/main/README.md",
     "https://raw.githubusercontent.com/zapplyjobs/Internships-2027/main/README.md",

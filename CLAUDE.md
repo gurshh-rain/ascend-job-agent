@@ -141,3 +141,8 @@ next (especially scraper.py and llm_filter.py, which should be testable
 without touching mailer/server at all). Ask me before making assumptions 
 about the exact markdown table format in the SimplifyJobs repo, fetch and 
 inspect it directly first.
+
+Verification:
+- Run `python -m unittest test_cli -v` for offline CSV CLI tests. These use temporary CSV files and never clear the user's saved listings or invoke uninstall.
+- Use `internship-bot list --help` for a safe installed-entry-point check. Avoid running the daily pipeline for CLI-only changes: even dry runs can start the server/tunnel.
+- Source URLs in config/.env override DEFAULT_SCRAPE_SOURCES; adding defaults alone does not enable new feeds for an existing explicit override.
